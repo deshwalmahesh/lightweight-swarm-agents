@@ -3,4 +3,5 @@ __pycache__/*
 *.cpython
 *.pyc
 __pycache__/
-
+example_data/*
+*.DS_store

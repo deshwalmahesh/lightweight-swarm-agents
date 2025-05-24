@@ -1,14 +1,5 @@
 """
-Demo — travel_daytrip.py
-========================
-A *complete* end‑to‑end example that plugs into **agent_framework.py**.
-
-What you get
-------------
-* **5 mock tools** (see docstrings for I/O)
-* **5 agents** each with its own persona, tool‑list and hand‑off map
-* Runtime wiring that uses GPT‑4o via the OpenAI Python SDK
-* A demonstration run in `__main__` that exercises success, missing‑info clarification
+Tools here mimic the API of different things
 """
 
 from __future__ import annotations
