@@ -1,14 +1,12 @@
 """
-src/core.py
-A minimal extensible multi-agent orchestration framework.
-
 Minimal extensible multi-agent orchestration framework whom anyone can use for any taks just by 
 adding agents, tools and orchestrating them.
 
 Core Principles and Ideas behind building:
 Minimal
-Non-Overengineered
+Non-Overengineered, Nothing Fancy
 Ready to use
+Reusable
 Dynamic
 Intelligent
 Production Ready
@@ -133,7 +131,9 @@ class AgentConfig:
     llm: LLM
     tools: list[str] = field(default_factory=list)
     allowed_agents: list[str] = field(default_factory=list)
+    allowed_agent_descriptions: dict[str, str] = field(default_factory=dict)
     task: str = "generic agent"
+    description: str = ""
     temperature: float = 0.7
 
 
@@ -227,6 +227,21 @@ class BaseAgent:
         return normalized
 
     # ── prompt builder ──────────────────────────────────────────────────
+    def _format_agent_descriptions(self) -> str:
+        """Format agent descriptions for the system prompt."""
+        if not self.cfg.allowed_agents:
+            return ""
+            
+        descriptions = []
+        for agent_name in self.cfg.allowed_agents:
+            description = self.cfg.allowed_agent_descriptions.get(agent_name, "")
+            if description:
+                descriptions.append(f"- {agent_name}: {description}")
+            else:
+                descriptions.append(f"- {agent_name}")
+                
+        return "\n".join(descriptions)
+        
     def _system_prompt(self, state: dict) -> str:
         short_state = json.dumps(state, default=str, indent=2)[:1800]
         
@@ -251,12 +266,12 @@ class BaseAgent:
         f"Mission: {self.cfg.task}\n\n"
         "You have some data which might or might not be relevant to the task. If you need additional data, either a tool or agent can provide that."
         f"Allowed tools for you to use: {', '.join(self.cfg.tools) or 'none'}\n"
-        f"Agents you can hand-off to: {', '.join(self.cfg.allowed_agents) or 'none'}\n\n"
+        f"Agents you can hand-off to:\n{self._format_agent_descriptions() or 'none'}\n\n"
         "IMPORTANT: You must respond with a valid JSON object containing an 'action' field with one of these values:\n"
         "1. 'tool' - to use a tool (include 'tool' and 'args' fields)\n"
         "2. 'handoff' - to hand off to another agent (include 'agent' field)\n"
         "3. 'respond' - to respond to the user (include 'output' field)\n\n"
-        "CRITICAL: Only use ONE tool at a time. DO NOT attempt to use multiple tools in parallel.\n\n"
+        "CRITICAL: Only use ONE tool at a time. DO NOT attempt to use multiple tools in parallel. Do not call Agents and tools unnecessarily. Use only when needed\n\n"
         "IMPORTANT TOOL HANDLING GUIDELINES:\n"
         "1. If a tool returns empty results (empty list, empty dict, etc.), DO NOT retry with the same parameters.\n"
         "2. For empty tool results, either try different BUT VALID parameters or hand off to another agent that can handle the situation.\n"
@@ -264,6 +279,7 @@ class BaseAgent:
         f"Examples:\n{chr(10).join(examples)}\n\n"
         "If you're very unclear about which tool to call or which agent to hand-off to, respond with:\n"
         "{\"action\": \"respond\", \"output\": \"I need more information to proceed. Please clarify...\"}\n\n"
+        "Before Sending the control to ErrorAgent, just make sure you have utilised the tools and Agents available to you and have not missed by mistake."
         "Current shared state ↓\n" + short_state
         )
 
@@ -351,7 +367,16 @@ class Orchestrator:
                         if not target or target not in self.agents:
                             logging.warning(f"Invalid handoff target: {target}")
                             self.state["error"] = f"Invalid handoff target: {target}"
-                            return f"Agent {self.current} tried to hand‑off to an unknown agent ({target})."
+                            
+                            # Provide information about available agents
+                            available_agents = []
+                            for name, agent in self.agents.items():
+                                if name != self.current:  # Don't include current agent
+                                    desc = agent.cfg.description if agent.cfg.description else "No description available"
+                                    available_agents.append(f"{name}: {desc}")
+                                    
+                            agent_info = "\n- ".join(available_agents)
+                            return f"Agent {self.current} tried to hand‑off to an unknown agent ({target}).\nAvailable agents:\n- {agent_info}"
                         logging.debug(f"Handing off from {self.current} to {target}")
                         logging.info(f"Output: Handing off to {target}")
                         self.current = target

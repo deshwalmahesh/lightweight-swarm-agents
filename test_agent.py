@@ -132,6 +132,11 @@ class IntentAgent(BaseAgent):
             llm=llm_default,
             tools=[],  # relies on LLM only
             allowed_agents=["FlightAgent"],
+            allowed_agent_descriptions={
+                "FlightAgent": "Searches for available flights that match user requirements",
+                "ErrorAgent": "Handles error cases and requests additional information from the user",
+            },
+            description="Extracts travel intent, origin, destination, date and budget from user input",
             task=("Extract origin, destination, date and budget from the user paragraph."
                   " If anything is missing ask the user via respond; else handoff to FlightAgent."),
             temperature=0.2,
@@ -148,6 +153,11 @@ class FlightAgent(BaseAgent):
             llm=llm_default,
             tools=["search_flights"],
             allowed_agents=["WeatherAgent", "ErrorAgent"],
+            allowed_agent_descriptions={
+                "WeatherAgent": "Checks weather conditions at the destination",
+                "ErrorAgent": "Handles error cases and requests additional information from the user"
+            },
+            description="Searches for available flights that match user requirements",
             task="Find the cheapest flight that meets date & budget.  If none → ErrorAgent.",
             temperature=0.4,
         )
@@ -161,6 +171,11 @@ class WeatherAgent(BaseAgent):
             llm=llm_default,
             tools=["get_weather"],
             allowed_agents=["BudgetAgent", "ErrorAgent"],
+            allowed_agent_descriptions={
+                "BudgetAgent": "Calculates and validates total trip cost against user budget",
+                "ErrorAgent": "Handles error cases and requests additional information from the user"
+            },
+            description="Checks weather conditions at the destination",
             task=("Check forecast at destination.  If rain is predicted → ErrorAgent asking for new date;"
                   " else hand‑off to BudgetAgent."),
         )
@@ -174,6 +189,11 @@ class BudgetAgent(BaseAgent):
             llm=llm_default,
             tools=["calc_budget"],
             allowed_agents=["PlannerAgent", "ErrorAgent"],
+            allowed_agent_descriptions={
+                "PlannerAgent": "Creates a detailed travel itinerary based on all collected information",
+                "ErrorAgent": "Handles error cases and requests additional information from the user"
+            },
+            description="Calculates and validates total trip cost against user budget",
             task=("Add up flight and optional hotel cost; if > user budget+10% → ErrorAgent, else PlannerAgent."),
         )
         super().__init__(cfg)
@@ -186,6 +206,7 @@ class PlannerAgent(BaseAgent):
             llm=llm_default,
             tools=[],
             allowed_agents=[],
+            description="Creates a detailed travel itinerary based on all collected information",
             task="Produce a friendly itinerary summarising choices in markdown and respond to user.",
         )
         super().__init__(cfg)
@@ -197,7 +218,8 @@ class ErrorAgent(BaseAgent):
             llm=llm_default,
             tools=[],
             allowed_agents=[],
-            task="Explain the problem and ask for revised inputs. Don't ask unnecessary info. Look if any to",
+            description="Handles error cases and requests additional information from the user",
+            task="Give the current context, solution found so far BUT definitely ask for revised inputs or any missing info. Don't ask unnecessary info",
         )
         super().__init__(cfg)
 
