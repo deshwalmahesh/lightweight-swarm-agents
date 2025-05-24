@@ -5,3 +5,13 @@ __pycache__/*
 __pycache__/
 example_data/*
 *.DS_store
+*.npy
+*.pth
+*.pt
+*.pdf
+*.zip
+*.json
+*.db
+*.sqlite
+*.lock
+*.voyager

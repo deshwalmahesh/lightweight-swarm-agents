@@ -6,37 +6,32 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from dotenv import load_dotenv
-
+import numpy as np
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 import fitz  # PyMuPDF
 
-# Import PyLate for embedding similarity
-from pylate import models, retrieve, indexes
-
 
 load_dotenv() 
 
-"""### Initialize OpenAI Client"""
-
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+ai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
 
-def download_job_description(url, output_path = "job_description.pdf"):
+def fetch_job_posting(url, output_path = "job_description.pdf"):
     """
-    Download job description from a given URL.
+    Download job posting document from a given URL.
     """
     response = requests.get(url)
     with open(output_path, "wb") as f:
         f.write(response.content)
     print(f"Downloaded {output_path}")
 
-def download_resumes(url, local_dir="example_data", fetch_only = 3):
+def retrieve_candidate_documents(url, local_dir="example_data", fetch_limit = 3):
     """
-    Download resumes from the given URL.
+    Download candidate resume documents from the given URL.
     """
 
     response = requests.get(url)
@@ -48,8 +43,8 @@ def download_resumes(url, local_dir="example_data", fetch_only = 3):
     data = response.json()
     os.makedirs(local_dir, exist_ok=True)
 
-    print(f"{min(fetch_only, len(data))} files available for download:")
-    for file in data[:fetch_only]:
+    print(f"{min(fetch_limit, len(data))} files available for download:")
+    for file in data[:fetch_limit]:
         file_name = file["name"]
         if os.path.exists(os.path.join(local_dir, file_name)): continue
         download_url = file["download_url"]
@@ -60,111 +55,112 @@ def download_resumes(url, local_dir="example_data", fetch_only = 3):
         print(f"Downloaded {file_name}")
 
 
-url = "https://raw.githubusercontent.com/mistralai/cookbook/main/mistral/agents/recruitment_agent/job_description.pdf"
-output_path = "job_description.pdf"
+source_url = "https://raw.githubusercontent.com/mistralai/cookbook/main/mistral/agents/recruitment_agent/job_description.pdf"
+destination_path = "job_description.pdf"
 
-download_job_description(url, output_path)
+fetch_job_posting(source_url, destination_path)
 
 
-download_resumes(
+retrieve_candidate_documents(
     url = "https://api.github.com/repos/mistralai/cookbook/contents/mistral/agents/recruitment_agent/resumes",
     local_dir="example_data"
 )
 
 
-class Skill(BaseModel):
+class Competency(BaseModel):
     name: str = Field(description="Name of the skill or technology")
-    level: Optional[str] = Field(description="Proficiency level (beginner, intermediate, advanced)")
-    years: Optional[float] = Field(description="Years of experience with this skill")
+    proficiency: Optional[str] = Field(description="Proficiency level (beginner, intermediate, advanced)")
+    duration: Optional[float] = Field(description="Years of experience with this skill")
 
-class Education(BaseModel):
-    degree: str = Field(description="Type of degree or certification obtained")
-    field: str = Field(description="Field of study or specialization")
-    institution: str = Field(description="Name of educational institution")
-    year_completed: Optional[int] = Field(description="Year when degree was completed")
-    gpa: Optional[float] = Field(description="Grade Point Average, typically on 4.0 scale")
+class AcademicBackground(BaseModel):
+    credential: str = Field(description="Type of degree or certification obtained")
+    discipline: str = Field(description="Field of study or specialization")
+    school: str = Field(description="Name of educational institution")
+    graduation_year: Optional[int] = Field(description="Year when degree was completed")
+    academic_score: Optional[float] = Field(description="Grade Point Average, typically on 1-10 CGPA or 0-100% score. Normalize it to 0-10 scale")
 
-class Experience(BaseModel):
-    title: str = Field(description="Job title or position held")
-    company: str = Field(description="Name of employer or organization")
-    duration_years: float = Field(description="Duration of employment in years")
-    skills_used: List[str] = Field(description="Skills utilized in this role")
-    achievements: List[str] = Field(description="Key accomplishments or responsibilities")
-    relevance_score: Optional[float] = Field(description="Relevance to current job opening (0-10 scale)")
+class WorkHistory(BaseModel):
+    position: str = Field(description="Job title or position held")
+    employer: str = Field(description="Name of employer or organization")
+    tenure_years: float = Field(description="Duration of employment in years")
+    applied_skills: List[str] = Field(description="Skills utilized in this role")
+    accomplishments: List[str] = Field(description="Key accomplishments or responsibilities")
+    job_relevance: Optional[float] = Field(description="Relevance to current job opening (0-10 scale)")
 
-class ContactDetails(BaseModel):
+class ApplicantInfo(BaseModel):
     name: str = Field(description="Full name of the candidate")
     email: str = Field(description="Primary email address for contact")
     phone: Optional[str] = Field(description="Phone number with country code if applicable")
     location: Optional[str] = Field(description="Current city and country/state")
     linkedin: Optional[str] = Field(description="LinkedIn profile URL")
-    website: Optional[str] = Field(description="Personal or portfolio website URL")
+    portfolio: Optional[str] = Field(description="Personal or portfolio website URL")
 
-class JobRequirements(BaseModel):
-    required_skills: List[Skill] = Field(description="Skills that are mandatory for the position")
-    preferred_skills: List[Skill] = Field(description="Skills that are desired but not required")
+class PositionRequirements(BaseModel):
+    essential_competencies: List[Competency] = Field(description="Skills that are mandatory for the position")
+    desired_competencies: List[Competency] = Field(description="Skills that are desired but not required")
     min_experience_years: float = Field(description="Minimum years of experience required")
-    required_education: List[Education] = Field(description="Mandatory educational qualifications")
-    preferred_domains: List[str] = Field(description="Industry domains or sectors preferred for experience")
+    required_education: List[AcademicBackground] = Field(description="Mandatory educational qualifications")
+    preferred_sectors: List[str] = Field(description="Industry domains or sectors preferred for experience")
 
-class CandidateProfile(BaseModel):
-    contact_details: ContactDetails = Field(description="Candidate's personal and contact information")
-    skills: List[Skill] = Field(description="Technical and soft skills possessed by the candidate")
-    education: List[Education] = Field(description="Educational background and qualifications")
-    experience: List[Experience] = Field(description="Professional work history and experience")
+class ApplicantProfile(BaseModel):
+    personal_info: ApplicantInfo = Field(description="Candidate's personal and contact information")
+    competencies: List[Competency] = Field(description="Technical and soft skills possessed by the candidate")
+    education: List[AcademicBackground] = Field(description="Educational background and qualifications")
+    work_experience: List[WorkHistory] = Field(description="Professional work history and experience")
 
-class SkillMatch(BaseModel):
-    skill_name: str = Field(description="Name of the skill being evaluated")
-    present: bool = Field(description="Whether the candidate possesses this skill")
-    match_level: float = Field(description="How well the candidate's skill matches the requirement (0-10 scale)")
-    confidence: float = Field(description="Confidence in the skill evaluation (0-1 scale)")
-    notes: str = Field(description="Additional context about the skill match assessment")
+class CompetencyMatch(BaseModel):
+    competency_name: str = Field(description="Name of the skill being evaluated")
+    is_present: bool = Field(description="Whether the candidate possesses this skill")
+    match_quality: float = Field(description="How well the candidate's skill matches the requirement (0-10 scale)")
+    assessment_confidence: float = Field(description="Confidence in the skill evaluation (0-1 scale)")
+    evaluation_notes: str = Field(description="Additional context about the skill match assessment")
 
-class CandidateScore(BaseModel):
-    technical_skills_score: float = Field(description="Assessment of technical capabilities (0-40 points)")
-    experience_score: float = Field(description="Evaluation of relevant work experience (0-30 points)")
-    education_score: float = Field(description="Rating of educational qualifications (0-15 points)")
-    additional_score: float = Field(description="Score for other relevant factors (0-15 points)")
-    embedding_similarity_score: Optional[float] = Field(description="Semantic similarity score between resume and job description (0-10 points)", default=0.0)
-    total_score: float = Field(description="Aggregate candidate evaluation score (0-100)")
-    key_strengths: List[str] = Field(description="Primary candidate advantages for this role")
-    key_gaps: List[str] = Field(description="Areas where the candidate lacks desired qualifications")
-    confidence: float = Field(description="Overall confidence in the evaluation accuracy (0-1 scale)")
-    notes: str = Field(description="Supplementary observations about the candidate fit")
+class ApplicantEvaluation(BaseModel):
+    technical_aptitude_score: float = Field(description="Assessment of technical capabilities (0-40 points)")
+    professional_experience_score: float = Field(description="Evaluation of relevant work experience (0-30 points)")
+    academic_qualification_score: float = Field(description="Assessment of educational qualifications (0-15 points)")
+    supplementary_qualification_score: float = Field(description="Evaluation of other relevant qualifications (0-15 points)")
+    semantic_similarity_score: Optional[float] = Field(description="Semantic similarity between resume and job description (0-10)")
+    overall_rating: float = Field(description="Overall candidate evaluation score (0-100 scale)")
+    competency_assessments: List[Dict] = Field(description="Detailed breakdown of skill match assessments")
+    key_strengths: List[str] = Field(description="Key candidate strengths relative to the position")
+    qualification_gaps: List[str] = Field(description="Areas where candidate does not meet requirements")
+    evaluation_confidence: float = Field(description="Overall confidence in the evaluation accuracy (0-1 scale)")
+    additional_observations: str = Field(description="Supplementary observations about the candidate fit")
 
-class CandidateResult(BaseModel):
-    file_name: str = Field(description="Name of the source resume file")
-    contact_details: ContactDetails = Field(description="Candidate's contact information")
-    candidate_profile: CandidateProfile = Field(description="Complete extracted candidate profile")
-    score: CandidateScore = Field(description="Detailed evaluation scores and assessment")
+class ApplicantResult(BaseModel):
+    document_name: str = Field(description="Name of the source resume file")
+    personal_info: ApplicantInfo = Field(description="Candidate's contact information")
+    profile_data: ApplicantProfile = Field(description="Complete extracted candidate profile")
+    evaluation: ApplicantEvaluation = Field(description="Detailed evaluation scores and assessment")
 
 
 
-class Agent:
-    def __init__(self, name: str, client: OpenAI):
-        self.name = name
+class Processor:
+    def __init__(self, identifier: str, client: OpenAI):
+        self.identifier = identifier
         self.client = client
 
-    def process(self, message):
+    def process(self, input_data):
         """Base process method - to be implemented by child classes"""
         raise NotImplementedError("Subclasses must implement process method")
 
-    def communicate(self, recipient_agent, message):
-        """Send message to another agent"""
-        return recipient_agent.process(message)
+    def relay(self, target_processor, input_data):
+        """Send data to another processor"""
+        return target_processor.process(input_data)
 
 
 
-class DocumentAgent(Agent):
+class DocumentProcessor(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("DocumentAgent", client)
+        super().__init__("DocumentProcessor", client)
 
     def process(self, file_info):
         """Process document extraction request"""
         file_path, file_name = file_info
-        return self.extract_text_from_file(file_path, file_name)
+        return self.parse_document_content(file_path, file_name)
 
-    def extract_text_from_file(self, file_path: str, file_name: str) -> str:
+    def parse_document_content(self, file_path: str, file_name: str) -> str:
         """Extract text from a file using PyMuPDF"""
         try:
             # Check if file exists
@@ -190,15 +186,15 @@ class DocumentAgent(Agent):
 
 
 
-class JobAnalysisAgent(Agent):
+class JobSpecificationProcessor(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("JobAnalysisAgent", client)
+        super().__init__("JobSpecificationProcessor", client)
 
-    def process(self, jd_text):
+    def process(self, job_description_text):
         """Process job description text"""
-        return self.extract_job_requirements(jd_text)
+        return self.extract_position_requirements(job_description_text)
 
-    def extract_job_requirements(self, jd_text: str) -> JobRequirements:
+    def extract_position_requirements(self, job_description_text: str) -> PositionRequirements:
         """Extract structured job requirements from a job description"""
         prompt = f"""
         Extract the key job requirements from the following job description.
@@ -206,19 +202,19 @@ class JobAnalysisAgent(Agent):
         
         Provide your response as a JSON object with the following structure:
         {{
-            "required_skills": [{{
+            "essential_competencies": [{{
                 "name": "skill name",
-                "level": "proficiency level",
-                "years": years of experience
+                "proficiency": "proficiency level",
+                "duration": years of experience
             }}],
-            "preferred_skills": [...],
+            "desired_competencies": [...],
             "min_experience_years": number,
             "required_education": [...],
-            "preferred_domains": [...]
+            "preferred_sectors": [...]
         }}
         
         Job Description:
-        {jd_text}
+        {job_description_text}
         """
 
         response = self.client.chat.completions.create(
@@ -234,15 +230,15 @@ class JobAnalysisAgent(Agent):
 
 
 
-class ResumeAnalysisAgent(Agent):
+class ProfileExtractionProcessor(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("ResumeAnalysisAgent", client)
+        super().__init__("ProfileExtractionProcessor", client)
 
     def process(self, resume_text):
         """Process resume text"""
-        return self.extract_candidate_profile(resume_text)
+        return self.extract_applicant_profile(resume_text)
 
-    def extract_candidate_profile(self, resume_text: str) -> CandidateProfile:
+    def extract_applicant_profile(self, resume_text: str) -> ApplicantProfile:
         """Extract structured candidate information from resume text"""
         prompt = f"""
         Extract the candidate's contact details, skills, education, and experience from the following resume.
@@ -250,21 +246,21 @@ class ResumeAnalysisAgent(Agent):
         
         Provide your response as a JSON object with the following structure:
         {{
-            "contact_details": {{
+            "personal_info": {{
                 "name": "candidate name",
                 "email": "email address",
                 "phone": "phone number",
                 "location": "location",
                 "linkedin": "linkedin profile",
-                "website": "website url"
+                "portfolio": "website url"
             }},
-            "skills": [{{
+            "competencies": [{{
                 "name": "skill name",
-                "level": "proficiency level",
-                "years": years of experience
+                "proficiency": "proficiency level",
+                "duration": years of experience
             }}],
             "education": [...],
-            "experience": [...]
+            "work_experience": [...]
         }}
         
         Resume:
@@ -284,9 +280,9 @@ class ResumeAnalysisAgent(Agent):
 
 
 
-class EmbeddingSimilarityAgent(Agent):
+class SemanticMatchingProcessor(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("EmbeddingSimilarityAgent", client)
+        super().__init__("SemanticMatchingProcessor", client)
         self.model = None
         try:
             from pylate import models
@@ -298,10 +294,10 @@ class EmbeddingSimilarityAgent(Agent):
         
     def process(self, data):
         """Process job description and resume text to calculate semantic similarity"""
-        jd_text, resume_text = data
-        return self.calculate_similarity(jd_text, resume_text)
+        job_text, resume_text = data
+        return self.measure_content_similarity(job_text, resume_text)
     
-    def calculate_similarity(self, jd_text: str, resume_text: str) -> float:
+    def measure_content_similarity(self, job_text: str, resume_text: str) -> float:
         """Calculate the semantic similarity between job description and resume"""
         if not self.model:
             return 5.0
@@ -309,12 +305,12 @@ class EmbeddingSimilarityAgent(Agent):
         try:
             # Truncate texts if they're too long
             max_length = 4096
-            jd_text = jd_text[:max_length] if len(jd_text) > max_length else jd_text
+            job_text = job_text[:max_length] if len(job_text) > max_length else job_text
             resume_text = resume_text[:max_length] if len(resume_text) > max_length else resume_text
             
             # Encode job description as query
-            jd_embeddings = self.model.encode(
-                [jd_text],
+            job_embeddings = self.model.encode(
+                [job_text],
                 batch_size=1,
                 is_query=True,
                 show_progress_bar=False
@@ -348,7 +344,7 @@ class EmbeddingSimilarityAgent(Agent):
             
             # Get scores
             results = retriever.retrieve(
-                queries_embeddings=jd_embeddings,
+                queries_embeddings=job_embeddings,
                 k=1
             )
             
@@ -371,33 +367,33 @@ class EmbeddingSimilarityAgent(Agent):
     
     def _interpret_score(self, score: float) -> str:
         if score >= 9.0:
-            return "Excellent similarity - resume is highly aligned with the job requirements"
+            return "Excellent alignment - resume is highly relevant to the job requirements"
         elif score >= 7.5:
-            return "Strong similarity - resume matches most of the job requirements"
+            return "Strong alignment - resume matches most of the job requirements"
         elif score >= 6.0:
-            return "Good similarity - resume matches many of the job requirements"
+            return "Good alignment - resume matches many of the job requirements"
         elif score >= 4.0:
-            return "Moderate similarity - resume matches some of the job requirements"
+            return "Moderate alignment - resume matches some of the job requirements"
         elif score >= 2.5:
-            return "Limited similarity - resume matches few of the job requirements"
+            return "Limited alignment - resume matches few of the job requirements"
         else:
-            return "Poor similarity - resume does not match the job requirements well"
+            return "Poor alignment - resume does not match the job requirements well"
 
 
-class MatchingAgent(Agent):
+class CandidateEvaluationProcessor(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("MatchingAgent", client)
+        super().__init__("CandidateEvaluationProcessor", client)
 
     def process(self, data):
         """Process job requirements and candidate profile to generate score"""
-        job_requirements, candidate_profile, resume_text = data
-        return self.evaluate_candidate(job_requirements, candidate_profile, resume_text)
+        position_requirements, applicant_profile, resume_text = data
+        return self.assess_candidate_fit(position_requirements, applicant_profile, resume_text)
 
-    def evaluate_candidate(self, job_requirements: JobRequirements, candidate_profile: CandidateProfile, resume_text: str) -> CandidateScore:
+    def assess_candidate_fit(self, position_requirements: PositionRequirements, applicant_profile: ApplicantProfile, resume_text: str) -> ApplicantEvaluation:
         """Evaluate how well a candidate matches the job requirements"""
         # Convert to JSON for inclusion in the prompt
-        job_req_json = json.dumps(job_requirements, indent=2)
-        candidate_json = json.dumps(candidate_profile, indent=2)
+        job_req_json = json.dumps(position_requirements, indent=2)
+        candidate_json = json.dumps(applicant_profile, indent=2)
 
         prompt = f"""
         Evaluate how well the candidate matches the job requirements.
@@ -412,24 +408,25 @@ class MatchingAgent(Agent):
         Assess the quality and relevance of the candidate's experience, not just keyword matches.
         Include confidence levels for your assessment.
 
-        Technical skills should be scored out of 40 points.
-        Experience should be scored out of 30 points.
-        Education should be scored out of 15 points.
-        Additional qualifications should be scored out of 15 points.
-        The total score should be out of 100 points.
+        IMPORTANT: ALL scores must be on a scale of 0-10, where 0 is the lowest possible score and 10 is the highest.
+        
+        Evaluate the following categories, all on a 0-10 scale:
+        - Technical aptitude (0-10)
+        - Professional experience (0-10)
+        - Academic qualifications (0-10)
+        - Supplementary qualifications (0-10)
         
         Return your evaluation as a JSON object with the following structure:
         {{
-            "technical_skills_score": numeric value between 0-40,
-            "experience_score": numeric value between 0-30,
-            "education_score": numeric value between 0-15,
-            "additional_qualifications_score": numeric value between 0-15,
-            "total_score": numeric value between 0-100,
-            "strengths": [list of strings],
-            "areas_for_improvement": [list of strings],
-            "overall_recommendation": string,
-            "confidence": numeric value between 0-1,
-            "notes": string
+            "technical_aptitude_score": numeric value between 0-10,
+            "professional_experience_score": numeric value between 0-10,
+            "academic_qualification_score": numeric value between 0-10,
+            "supplementary_qualification_score": numeric value between 0-10,
+            "key_strengths": [list of strings],
+            "qualification_gaps": [list of strings],
+            "recommendation": string,
+            "evaluation_confidence": numeric value between 0-1,
+            "additional_observations": string
         }}
         """
 
@@ -446,53 +443,53 @@ class MatchingAgent(Agent):
 
 
 
-class EmailCommunicationAgent(Agent):
+class CommunicationProcessor(Processor):
     def __init__(self, client: OpenAI, sender_email: str, app_password: str):
-        super().__init__("EmailCommunicationAgent", client)
+        super().__init__("CommunicationProcessor", client)
         self.sender_email = sender_email
         self.app_password = app_password
 
     def process(self, data):
         """Process email sending request"""
-        candidate, calendly_link, subject = data
-        return self.send_interview_invitation(candidate, calendly_link, subject)
+        applicant, scheduling_link, email_subject = data
+        return self.deliver_interview_invitation(applicant, scheduling_link, email_subject)
 
-    def send_interview_invitation(self, candidate, calendly_link: str, subject: str):
+    def deliver_interview_invitation(self, applicant, scheduling_link: str, email_subject: str):
         """Generate and send personalized email to candidate"""
-        name = candidate["contact_details"]['name']
-        email = candidate["contact_details"]['email']
+        name = applicant["personal_info"]['name']
+        email = applicant["personal_info"]['email']
 
         # Create email HTML content
         html_content = f"""\
         <html>
           <body>
-            <p>Hello {name},</p>
-            <p>I'm the Hiring Manager from HireFive. Thank you for applying for the Data Scientist position at our company.</p>
-            <p>We were impressed with your background and would like to schedule an initial screening call to discuss your experience and interest in the role.</p>
-            <p>Please select a suitable time slot using our <a href="{calendly_link}">Calendly link</a>.</p>
-            <p>Looking forward to speaking with you soon.</p>
-            <p>Best regards,<br>
-            Hiring Manager<br>
-            HireFive</p>
+            <p>Dear {name},</p>
+            <p>I'm the Talent Acquisition Specialist at TechTalent Solutions. We appreciate your interest in the Machine Learning Engineer position.</p>
+            <p>After reviewing your qualifications, we'd like to invite you to a video interview to further discuss your background and how it aligns with our team's needs.</p>
+            <p>You can reserve your preferred interview time using this <a href="{scheduling_link}">scheduling link</a>.</p>
+            <p>If you have any questions before the interview, please don't hesitate to reach out.</p>
+            <p>Warm regards,<br>
+            Talent Acquisition Team<br>
+            TechTalent Solutions</p>
           </body>
         </html>
         """
 
         if self.app_password:
             try:
-                self.send_email(email, subject, html_content)
-                return f"Email sent to {name} at {email}"
+                self.transmit_email(email, email_subject, html_content)
+                return f"Interview invitation email delivered to {name} at {email}"
             except Exception as e:
-                return f"Failed to send email to {name} ({email}): {str(e)}"
+                return f"Communication failed with {name} ({email}): {str(e)}"
         else:
-            return f"Would send email to {name} at {email} - Email subject: {subject}"
+            return f"Interview invitation would be sent to {name} at {email} with subject: {email_subject}"
 
-    def send_email(self, receiver_email, subject, html_content):
+    def transmit_email(self, recipient_email, subject, html_content):
         """Send an email using Gmail SMTP"""
         # Create message container
         message = MIMEMultipart('alternative')
         message['From'] = self.sender_email
-        message['To'] = receiver_email
+        message['To'] = recipient_email
         message['Subject'] = subject
 
         # Attach HTML part
@@ -508,29 +505,29 @@ class EmailCommunicationAgent(Agent):
 
             # Send email
             text = message.as_string()
-            server.sendmail(self.sender_email, receiver_email, text)
+            server.sendmail(self.sender_email, recipient_email, text)
 
         finally:
             server.quit()  # Close the connection
 
 
 
-class CoordinatorAgent(Agent):
+class RecruitmentOrchestrator(Processor):
     def __init__(self, client: OpenAI):
-        super().__init__("CoordinatorAgent", client)
-        self.document_agent = DocumentAgent(client)
-        self.job_analysis_agent = JobAnalysisAgent(client)
-        self.resume_analysis_agent = ResumeAnalysisAgent(client)
-        self.matching_agent = MatchingAgent(client)
-        self.embedding_similarity_agent = EmbeddingSimilarityAgent(client)
-        self.email_communication_agent = None  # Will be initialized later with email credentials
+        super().__init__("RecruitmentOrchestrator", client)
+        self.document_processor = DocumentProcessor(client)
+        self.job_specification_processor = JobSpecificationProcessor(client)
+        self.profile_extraction_processor = ProfileExtractionProcessor(client)
+        self.candidate_evaluation_processor = CandidateEvaluationProcessor(client)
+        self.semantic_matching_processor = SemanticMatchingProcessor(client)
+        self.communication_processor = None  # Will be initialized later with email credentials
 
-    def set_email_communication_agent(self, sender_email: str, app_password: str):
-        """Initialize communication agent with email credentials"""
-        self.email_communication_agent = EmailCommunicationAgent(self.client, sender_email, app_password)
+    def configure_communication_processor(self, sender_email: str, app_password: str):
+        """Initialize communication processor with email credentials"""
+        self.communication_processor = CommunicationProcessor(self.client, sender_email, app_password)
 
-    def process_hiring_workflow(self, jd_file_path: str, resume_dir: str, output_path: str,
-                               threshold_score: float, calendly_link: str, email_subject: str):
+    def execute_recruitment_pipeline(self, jd_file_path: str, resume_dir: str, output_path: str,
+                               scheduling_link: str, email_subject: str):
         """
         Coordinate the entire hiring workflow from document processing to interview scheduling
         """
@@ -538,15 +535,15 @@ class CoordinatorAgent(Agent):
 
         # Process job description
         print(f"Extracting text from job description...")
-        jd_text = self.document_agent.process((jd_file_path, os.path.basename(jd_file_path)))
+        job_description_text = self.document_processor.process((jd_file_path, os.path.basename(jd_file_path)))
 
-        if not jd_text:
+        if not job_description_text:
             print("Failed to extract text from job description. Aborting.")
             return results
 
         # Extract job requirements
         print(f"Analyzing job description...")
-        job_requirements = self.job_analysis_agent.process(jd_text)
+        position_requirements = self.job_specification_processor.process(job_description_text)
 
         time.sleep(10)
 
@@ -558,42 +555,46 @@ class CoordinatorAgent(Agent):
             print(f"\nProcessing resume: {filename}")
 
             # Extract text from resume
-            resume_text = self.document_agent.process((file_path, filename))
+            resume_text = self.document_processor.process((file_path, filename))
 
             time.sleep(10)
 
             if resume_text:
-                # Extract candidate profile
-                print(f"Extracting candidate profile...")
-                candidate_profile = self.resume_analysis_agent.process(resume_text)
+                # Extract applicant profile
+                print(f"Extracting applicant profile...")
+                applicant_profile = self.profile_extraction_processor.process(resume_text)
 
-                # Calculate embedding similarity
+                # Calculate semantic similarity
                 print(f"Calculating semantic similarity...")
-                embedding_similarity_score = self.embedding_similarity_agent.process((jd_text, resume_text))
+                semantic_similarity_score = self.semantic_matching_processor.process((job_description_text, resume_text))
                 
-                # Evaluate candidate match
-                print(f"Evaluating candidate {candidate_profile['contact_details']['name']}...")
-                score = self.matching_agent.process((job_requirements, candidate_profile, resume_text))
+                # Evaluate applicant match
+                print(f"Evaluating applicant {applicant_profile['personal_info']['name']}...")
+                evaluation = self.candidate_evaluation_processor.process((position_requirements, applicant_profile, resume_text))
                 
-                # Add embedding similarity score to the overall score
-                score['embedding_similarity_score'] = embedding_similarity_score
+                # Add semantic similarity score to the overall evaluation (ensure it's on 0-10 scale)
+                evaluation['semantic_similarity_score'] = semantic_similarity_score
+  
                 
-                # Adjust total score to include embedding similarity (optional)
-                # This keeps the total at 100 by slightly reducing the weight of other factors
-                score['total_score'] = (
-                    score['technical_skills_score'] * 0.38 + 
-                    score['experience_score'] * 0.28 + 
-                    score['education_score'] * 0.14 + 
-                    score['additional_qualifications_score'] * 0.14 + 
-                    embedding_similarity_score * 0.06
-                )
+                # Define weights and scores
+                weights = np.array([4, 3, 1.5, 1.5, 1])
+                scores = np.array([
+                    evaluation['technical_aptitude_score'],
+                    evaluation['professional_experience_score'],
+                    evaluation['academic_qualification_score'],
+                    evaluation['supplementary_qualification_score'],
+                    semantic_similarity_score
+                ])
+                
+                # Calculate weighted average
+                evaluation['average_score'] = np.average(scores, weights=weights)
 
                 # Create result object
                 result = {
-                    "file_name": filename,
-                    "contact_details": candidate_profile["contact_details"],
-                    "candidate_profile": candidate_profile,
-                    "score": score
+                    "document_name": filename,
+                    "personal_info": applicant_profile["personal_info"],
+                    "profile_data": applicant_profile,
+                    "evaluation": evaluation
                 }
 
                 results.append(result)
@@ -603,8 +604,8 @@ class CoordinatorAgent(Agent):
             else:
                 print(f"Failed to extract text from {filename}. Skipping this resume.")
 
-        # Sort results by total score
-        results.sort(key=lambda x: x["score"]['total_score'], reverse=True)
+        # Sort results by average score
+        results.sort(key=lambda x: x["evaluation"]['average_score'], reverse=True)
 
         # Save results to file
         with open(output_path, 'w') as f:
@@ -613,53 +614,49 @@ class CoordinatorAgent(Agent):
         print(f"\nResults saved to {output_path}")
 
         # Print summary of results
-        print("\n===== CANDIDATE RANKING =====")
+        print("\n===== APPLICANT RANKING =====")
         for i, result in enumerate(results, 1):
-            name = result["contact_details"]['name']
-            score = result["score"]['total_score']
-            print(f"{i}. {name}: {score}/100")
+            name = result["personal_info"]['name']
+            score = result["evaluation"]['average_score']
+            print(f"{i}. {name}: {score:.2f}/10")
 
-        # Send interview invitations to candidates above threshold
-        if self.email_communication_agent:
-            selected_candidates = [r for r in results if r["score"]['total_score'] >= threshold_score]
+        # Send interview invitations to applicants with average score above 7.5 (0.75 on a 0-1 scale)
+        if self.communication_processor:
+            selected_applicants = [r for r in results if r["evaluation"]['average_score'] >= 7.5]
 
-            print(f"\nPreparing to send interview invitations to {len(selected_candidates)} candidates who scored {threshold_score}+ out of 100...\n")
+            print(f"\nPreparing to send interview invitations to {len(selected_applicants)} applicants who scored 7.5+ out of 10...\n")
 
-            for candidate in selected_candidates:
-                response = self.email_communication_agent.process((candidate, calendly_link, email_subject))
+            for applicant in selected_applicants:
+                response = self.communication_processor.process((applicant, scheduling_link, email_subject))
                 time.sleep(1)
 
         return results
 
+if __name__ == "__main__":
+    job_posting_path = "job_description.pdf"
+    applicant_docs_dir = "example_data/"
+    results_output_path = "applicant_results.json"
+
+    sender_email = "<Your EmailID>"
+    app_password = "<Your generated app password>"
+    scheduling_link = "<Your Interview Scheduling Link>"
+    email_subject = "TechTalent Solutions: Interview Invitation for Machine Learning Engineer Role"
 
 
-jd_file_path = "job_description.pdf"
-resume_dir = "example_data/"
-output_path = "candidate_results.json"
+    recruitment_system = RecruitmentOrchestrator(ai_client)
 
 
-
-sender_email = "<Your EmailID>"
-app_password = "<Your generated app password>"
-calendly_link = "<Your Calendly Link>"
-email_subject = "HireFive: Next Steps for Your Data Scientist Application"
+    recruitment_system.configure_communication_processor(sender_email, app_password)
 
 
-coordinator = CoordinatorAgent(client)
+    # we're using a fixed threshold of 7.5/10
+    results = recruitment_system.execute_recruitment_pipeline(
+        jd_file_path=job_posting_path,
+        resume_dir=applicant_docs_dir,
+        output_path=results_output_path,
+        scheduling_link=scheduling_link,
+        email_subject=email_subject
+    )
 
 
-coordinator.set_email_communication_agent(sender_email, app_password)
-
-
-threshold_score = 65  # Only send to candidates with 65+ overall score
-results = coordinator.process_hiring_workflow(
-    jd_file_path=jd_file_path,
-    resume_dir=resume_dir,
-    output_path=output_path,
-    threshold_score=threshold_score,
-    calendly_link=calendly_link,
-    email_subject=email_subject
-)
-
-
-print(results)
+    print(results)
