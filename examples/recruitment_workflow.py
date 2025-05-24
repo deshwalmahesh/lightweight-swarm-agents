@@ -16,9 +16,6 @@ import fitz  # PyMuPDF
 # Import PyLate for embedding similarity
 from pylate import models, retrieve, indexes
 
-# Import core components
-from src.core import tool, ToolRegistry, BaseAgent, AgentConfig, LLM
-
 
 load_dotenv() 
 
@@ -28,83 +25,51 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
 
-@tool("download_job_description")
-def download_job_description(url: str, output_path: str = "job_description.pdf") -> str:
+def download_job_description(url, output_path = "job_description.pdf"):
     """
     Download job description from a given URL.
-    
-    Args:
-        url: The URL to download the job description PDF from
-        output_path: Path where the job description PDF will be saved
-        
-    Returns:
-        Path to the downloaded file
     """
     response = requests.get(url)
     with open(output_path, "wb") as f:
         f.write(response.content)
     print(f"Downloaded {output_path}")
-    return output_path
 
-@tool("download_resumes")
-def download_resumes(url: str, local_dir: str = "example_data", fetch_only: int = 3) -> List[str]:
+def download_resumes(url, local_dir="example_data", fetch_only = 3):
     """
     Download resumes from the given URL.
-    
-    Args:
-        url: The GitHub API URL to fetch resume files from
-        local_dir: Local directory to save the files to
-        fetch_only: Maximum number of files to download
-        
-    Returns:
-        List of downloaded file paths
     """
+
     response = requests.get(url)
 
     if response.status_code != 200:
         print("Failed to retrieve folder contents:", response.text)
-        return []
+        return
 
     data = response.json()
     os.makedirs(local_dir, exist_ok=True)
-    
-    downloaded_files = []
+
     print(f"{min(fetch_only, len(data))} files available for download:")
-    
     for file in data[:fetch_only]:
         file_name = file["name"]
-        file_path = os.path.join(local_dir, file_name)
-        
-        if os.path.exists(file_path):
-            print(f"File {file_name} already exists, skipping")
-            downloaded_files.append(file_path)
-            continue
-            
+        if os.path.exists(os.path.join(local_dir, file_name)): continue
         download_url = file["download_url"]
 
         r = requests.get(download_url)
-        with open(file_path, "wb") as f:
+        with open(os.path.join(local_dir, file_name), "wb") as f:
             f.write(r.content)
         print(f"Downloaded {file_name}")
-        downloaded_files.append(file_path)
-        
-    return downloaded_files
 
 
 url = "https://raw.githubusercontent.com/mistralai/cookbook/main/mistral/agents/recruitment_agent/job_description.pdf"
 output_path = "job_description.pdf"
 
-# Use the tool registry to call the download_job_description function
-jd_file_path = download_job_description(url, output_path)
+download_job_description(url, output_path)
 
-# Use the tool registry to call the download_resumes function
-resume_files = download_resumes(
+
+download_resumes(
     url = "https://api.github.com/repos/mistralai/cookbook/contents/mistral/agents/recruitment_agent/resumes",
     local_dir="example_data"
 )
-
-print(f"Downloaded resume files: {resume_files}")
-
 
 
 class Skill(BaseModel):
@@ -175,24 +140,17 @@ class CandidateResult(BaseModel):
 
 
 
-class Agent(BaseAgent):
+class Agent:
     def __init__(self, name: str, client: OpenAI):
-        # Create an AgentConfig for this agent
-        config = AgentConfig(
-            name=name,
-            llm=LLM(model_name="gpt-4", client=client),
-            task="recruitment workflow"
-        )
-        super().__init__(config)
-        self.client = client  # Keep a reference to the original client for backward compatibility
+        self.name = name
+        self.client = client
 
-    # Base process method - to be implemented by child classes
     def process(self, message):
-        # This method will be implemented by child classes
-        raise NotImplementedError("Subclasses must implement this method")
+        """Base process method - to be implemented by child classes"""
+        raise NotImplementedError("Subclasses must implement process method")
 
-    # Send message to another agent
     def communicate(self, recipient_agent, message):
+        """Send message to another agent"""
         return recipient_agent.process(message)
 
 
